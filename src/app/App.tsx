@@ -476,9 +476,20 @@ function PacvueHQDropdown({
   onClose: () => void;
 }) {
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
-  const [showFullNav, setShowFullNav] = useState(false);
+  const [showFullNav, setShowFullNavState] = useState(() => {
+    const saved = localStorage.getItem("pacvue-nav-view");
+    return saved ? JSON.parse(saved) : false;
+  });
   const [search, setSearch] = useState("");
   const roleRef = useRef<HTMLDivElement>(null);
+
+  const setShowFullNav = (value: boolean | ((prev: boolean) => boolean)) => {
+    setShowFullNavState((prev) => {
+      const newValue = typeof value === "function" ? value(prev) : value;
+      localStorage.setItem("pacvue-nav-view", JSON.stringify(newValue));
+      return newValue;
+    });
+  };
 
   const currentRole = ROLES.find((r) => r.id === selectedRole)!;
 
@@ -507,48 +518,53 @@ function PacvueHQDropdown({
       .filter((cat) => cat.items.length > 0);
   })();
 
-  // Full-nav: filter flat sorted list by search, then split into 3 columns
+  // Full-nav: filter flat sorted list by search, then group by first letter
   const filteredAllItems = ALL_ITEMS_SORTED.filter((item) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return item.label.toLowerCase().includes(q) || item.tooltip.toLowerCase().includes(q);
   });
-  const colSize = Math.ceil(filteredAllItems.length / 3);
-  const fullNavColumns = [
-    filteredAllItems.slice(0, colSize),
-    filteredAllItems.slice(colSize, colSize * 2),
-    filteredAllItems.slice(colSize * 2),
-  ].filter((col) => col.length > 0);
+
+  // Group items by first letter
+  const itemsByLetter: Record<string, MenuItem[]> = {};
+  filteredAllItems.forEach((item) => {
+    const letter = item.label.charAt(0).toUpperCase();
+    if (!itemsByLetter[letter]) itemsByLetter[letter] = [];
+    itemsByLetter[letter].push(item);
+  });
+  const sortedLetters = Object.keys(itemsByLetter).sort();
 
   return (
     <div className="bg-white rounded-[10px] shadow-[0px_10px_15px_-3px_rgba(0,0,0,0.1),0px_4px_6px_-4px_rgba(0,0,0,0.1)] overflow-hidden flex flex-col">
       {/* Top bar: role selector + search */}
       <div className="border-b border-[#dedfe3] px-6 py-5 flex items-start justify-between gap-4 flex-wrap">
-        <div ref={roleRef} className="relative">
-          <button
-            onClick={() => setRoleDropdownOpen((v) => !v)}
-            className="flex items-center gap-2.5 h-9 px-3 bg-white border border-[#dedfe3] rounded-[4px] text-sm"
-          >
-            <span className="font-medium text-[#45464f] whitespace-nowrap">View by role</span>
-            <div className="h-4 w-px bg-[#dedfe3]" />
-            <span className="font-normal text-[#66666c] whitespace-nowrap max-w-[180px] truncate">
-              {currentRole.label}
-            </span>
-            <svg viewBox="0 0 10 7" fill="none" className="size-4 flex-shrink-0">
-              <path clipRule="evenodd" d="M0.5 0.75L5 5.25L9.5 0.75" fill="none" stroke="#B2B2B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fillRule="evenodd" />
-            </svg>
-          </button>
-          {roleDropdownOpen && (
-            <RoleDropdown
-              selectedRole={selectedRole}
-              onSelect={(r) => { onRoleChange(r); setShowFullNav(false); }}
-              onClose={() => setRoleDropdownOpen(false)}
-            />
-          )}
-        </div>
+        {!showFullNav && (
+          <div ref={roleRef} className="relative">
+            <button
+              onClick={() => setRoleDropdownOpen((v) => !v)}
+              className="flex items-center gap-2.5 h-9 px-3 bg-white border border-[#dedfe3] rounded-[4px] text-sm"
+            >
+              <span className="font-medium text-[#45464f] whitespace-nowrap">View by role</span>
+              <div className="h-4 w-px bg-[#dedfe3]" />
+              <span className="font-normal text-[#66666c] whitespace-nowrap max-w-[180px] truncate">
+                {currentRole.label}
+              </span>
+              <svg viewBox="0 0 10 7" fill="none" className="size-4 flex-shrink-0">
+                <path clipRule="evenodd" d="M0.5 0.75L5 5.25L9.5 0.75" fill="none" stroke="#B2B2B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fillRule="evenodd" />
+              </svg>
+            </button>
+            {roleDropdownOpen && (
+              <RoleDropdown
+                selectedRole={selectedRole}
+                onSelect={(r) => { onRoleChange(r); setShowFullNav(false); }}
+                onClose={() => setRoleDropdownOpen(false)}
+              />
+            )}
+          </div>
+        )}
 
         {/* Search */}
-        <div className="flex-1 min-w-[180px] max-w-[289px] h-9 relative rounded-[4px] border border-[#dedfe3] bg-white flex items-center px-3 gap-2">
+        <div className={`h-9 relative rounded-[4px] border border-[#dedfe3] bg-white flex items-center px-3 gap-2 ${showFullNav ? 'w-full' : 'flex-1 min-w-[180px] max-w-[289px]'}`}>
           <input
             className="flex-1 text-sm text-[#66666c] placeholder-[#66666c] outline-none bg-transparent"
             placeholder="Search"
@@ -562,17 +578,18 @@ function PacvueHQDropdown({
       {/* Menu columns */}
       <div>
         {showFullNav ? (
-          /* ── Full navigation: flat A–Z grid ── */
+          /* ── Full navigation: alphabetical index ── */
           filteredAllItems.length > 0 ? (
-            <div className="flex items-start">
-              {fullNavColumns.map((col, ci) => (
-                <div key={ci} className="flex-shrink-0 w-[300px] self-stretch border-r border-[#e5e7eb] last:border-r-0">
-                  <div className="px-6 py-5 flex flex-col gap-3">
-                    {col.map((item) => (
+            <div className="px-6 py-5 flex flex-col gap-4 max-h-96 overflow-y-auto">
+              {sortedLetters.map((letter) => (
+                <div key={letter}>
+                  <p className="text-xs font-semibold text-[#82858b] uppercase tracking-wide mb-2">{letter}</p>
+                  <div className="flex flex-col gap-2">
+                    {itemsByLetter[letter].map((item) => (
                       <Tooltip key={item.id} text={item.tooltip}>
                         <button
                           onClick={() => { onNavigate(item.id); onClose(); }}
-                          className="text-left text-base leading-6 text-[#4a5565] hover:bg-[#fff4ec] transition-colors duration-100 w-full rounded-sm px-2 -mx-2"
+                          className="text-left text-sm leading-6 text-[#4a5565] hover:text-[#7367f0] hover:translate-x-0.5 transition-all duration-150 w-full"
                         >
                           {item.label}
                         </button>
